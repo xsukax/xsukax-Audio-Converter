@@ -150,12 +150,13 @@
 
     <div class="notification-container" id="notificationContainer"></div>
 
-    <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.10.1/dist/ffmpeg.min.js"></script>
+    <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
     <script>
         const { createFFmpeg, fetchFile } = FFmpeg;
         const ffmpeg = createFFmpeg({
             log: true,
             corePath: 'https://unpkg.com/@ffmpeg/core-st@0.11.1/dist/ffmpeg-core.js',
+            mainName: 'main',
             progress: ({ ratio }) => {
                 if (ratio >= 0 && ratio <= 1) {
                     updateProgress(Math.round(ratio * 100), 'Converting...');
