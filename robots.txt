@@ -1,4 +1,0 @@
-User-agent: *
-Allow: /
-
-Sitemap: http://ffmpeg.gcc.ac.cn/sitemap.txt
