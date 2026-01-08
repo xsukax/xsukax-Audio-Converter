@@ -152,13 +152,13 @@
 
     <div class="notification-container" id="notificationContainer"></div>
 
-    <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.js"></script>
-    <script src="https://unpkg.com/@ffmpeg/util@0.12.1/dist/umd/index.js"></script>
     <script>
         let ffmpeg = null;
         let isFFmpegLoaded = false;
         let selectedFile = null;
         let isConverting = false;
+        let FFmpegModule = null;
+        let FFmpegUtilModule = null;
 
         // Initialize DOM elements
         const elements = {
@@ -309,14 +309,58 @@
         }
 
         // FFmpeg initialization
+        async function loadFFmpegLibraries() {
+            return new Promise((resolve, reject) => {
+                // Load FFmpeg library
+                const ffmpegScript = document.createElement('script');
+                ffmpegScript.src = 'https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.js';
+                ffmpegScript.crossOrigin = 'anonymous';
+                
+                ffmpegScript.onload = () => {
+                    log('FFmpeg library loaded', 'info');
+                    
+                    // Load FFmpeg Util library
+                    const utilScript = document.createElement('script');
+                    utilScript.src = 'https://cdn.jsdelivr.net/npm/@ffmpeg/util@0.12.1/dist/umd/index.js';
+                    utilScript.crossOrigin = 'anonymous';
+                    
+                    utilScript.onload = () => {
+                        log('FFmpeg utilities loaded', 'info');
+                        // Wait a bit to ensure globals are available
+                        setTimeout(() => {
+                            if (typeof FFmpegWasm !== 'undefined' && typeof FFmpegUtil !== 'undefined') {
+                                FFmpegModule = FFmpegWasm;
+                                FFmpegUtilModule = FFmpegUtil;
+                                resolve();
+                            } else {
+                                reject(new Error('FFmpeg libraries not available'));
+                            }
+                        }, 100);
+                    };
+                    
+                    utilScript.onerror = () => reject(new Error('Failed to load FFmpeg utilities'));
+                    document.head.appendChild(utilScript);
+                };
+                
+                ffmpegScript.onerror = () => reject(new Error('Failed to load FFmpeg library'));
+                document.head.appendChild(ffmpegScript);
+            });
+        }
+
         async function loadFFmpeg() {
             try {
-                log('Loading FFmpeg core...', 'info');
+                log('Loading FFmpeg libraries...', 'info');
                 elements.progressContainer.classList.add('show');
-                updateProgress(0, 'Initializing FFmpeg...');
+                updateProgress(0, 'Loading libraries...');
                 
-                const { FFmpeg } = FFmpegWasm;
-                const { toBlobURL, fetchFile } = FFmpegUtil;
+                // Load libraries dynamically
+                await loadFFmpegLibraries();
+                
+                log('Creating FFmpeg instance...', 'info');
+                updateProgress(10, 'Initializing FFmpeg...');
+                
+                const { FFmpeg } = FFmpegModule;
+                const { toBlobURL } = FFmpegUtilModule;
                 
                 ffmpeg = new FFmpeg();
                 
@@ -383,7 +427,7 @@
             elements.progressContainer.classList.add('show');
             
             try {
-                const { fetchFile } = FFmpegUtil;
+                const { fetchFile } = FFmpegUtilModule;
                 const inputFileName = selectedFile.name;
                 const outputFormat = elements.outputFormat.value;
                 const outputFileName = getOutputFileName(inputFileName, outputFormat);
