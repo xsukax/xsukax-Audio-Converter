@@ -109,8 +109,6 @@
                         <option value="aac">AAC (Advanced Audio Coding)</option>
                         <option value="ogg">OGG (Ogg Vorbis)</option>
                         <option value="m4a">M4A (MPEG-4 Audio)</option>
-                        <option value="opus">OPUS (Opus Audio)</option>
-                        <option value="wma">WMA (Windows Media Audio)</option>
                     </select>
                 </div>
                 <div class="input-group" id="bitrateGroup" style="display: none;">
@@ -152,13 +150,21 @@
 
     <div class="notification-container" id="notificationContainer"></div>
 
+    <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.10.1/dist/ffmpeg.min.js"></script>
     <script>
-        let ffmpeg = null;
+        const { createFFmpeg, fetchFile } = FFmpeg;
+        const ffmpeg = createFFmpeg({
+            log: true,
+            progress: ({ ratio }) => {
+                if (ratio >= 0 && ratio <= 1) {
+                    updateProgress(Math.round(ratio * 100), 'Converting...');
+                }
+            }
+        });
+
         let isFFmpegLoaded = false;
         let selectedFile = null;
         let isConverting = false;
-        let FFmpegModule = null;
-        let FFmpegUtilModule = null;
 
         // Initialize DOM elements
         const elements = {
@@ -250,9 +256,7 @@
                 'mp3': ['320k', '256k', '192k', '128k', '96k', '64k'],
                 'aac': ['320k', '256k', '192k', '128k', '96k', '64k'],
                 'ogg': ['320k', '256k', '192k', '128k', '96k', '64k'],
-                'opus': ['256k', '192k', '128k', '96k', '64k', '48k', '32k'],
                 'm4a': ['320k', '256k', '192k', '128k', '96k', '64k'],
-                'wma': ['320k', '256k', '192k', '128k', '96k', '64k'],
                 'wav': [],
                 'flac': []
             };
@@ -289,9 +293,7 @@
                 'flac': 'audio/flac',
                 'aac': 'audio/aac',
                 'ogg': 'audio/ogg',
-                'm4a': 'audio/mp4',
-                'opus': 'audio/opus',
-                'wma': 'audio/x-ms-wma'
+                'm4a': 'audio/mp4'
             };
             return mimeTypes[format] || 'audio/mpeg';
         }
@@ -309,78 +311,13 @@
         }
 
         // FFmpeg initialization
-        async function loadFFmpegLibraries() {
-            return new Promise((resolve, reject) => {
-                // Load FFmpeg library
-                const ffmpegScript = document.createElement('script');
-                ffmpegScript.src = 'https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.js';
-                ffmpegScript.crossOrigin = 'anonymous';
-                
-                ffmpegScript.onload = () => {
-                    log('FFmpeg library loaded', 'info');
-                    
-                    // Load FFmpeg Util library
-                    const utilScript = document.createElement('script');
-                    utilScript.src = 'https://cdn.jsdelivr.net/npm/@ffmpeg/util@0.12.1/dist/umd/index.js';
-                    utilScript.crossOrigin = 'anonymous';
-                    
-                    utilScript.onload = () => {
-                        log('FFmpeg utilities loaded', 'info');
-                        // Wait a bit to ensure globals are available
-                        setTimeout(() => {
-                            if (typeof FFmpegWasm !== 'undefined' && typeof FFmpegUtil !== 'undefined') {
-                                FFmpegModule = FFmpegWasm;
-                                FFmpegUtilModule = FFmpegUtil;
-                                resolve();
-                            } else {
-                                reject(new Error('FFmpeg libraries not available'));
-                            }
-                        }, 100);
-                    };
-                    
-                    utilScript.onerror = () => reject(new Error('Failed to load FFmpeg utilities'));
-                    document.head.appendChild(utilScript);
-                };
-                
-                ffmpegScript.onerror = () => reject(new Error('Failed to load FFmpeg library'));
-                document.head.appendChild(ffmpegScript);
-            });
-        }
-
         async function loadFFmpeg() {
             try {
-                log('Loading FFmpeg libraries...', 'info');
+                log('Loading FFmpeg...', 'info');
                 elements.progressContainer.classList.add('show');
-                updateProgress(0, 'Loading libraries...');
+                updateProgress(0, 'Initializing FFmpeg...');
                 
-                // Load libraries dynamically
-                await loadFFmpegLibraries();
-                
-                log('Creating FFmpeg instance...', 'info');
-                updateProgress(10, 'Initializing FFmpeg...');
-                
-                const { FFmpeg } = FFmpegModule;
-                const { toBlobURL } = FFmpegUtilModule;
-                
-                ffmpeg = new FFmpeg();
-                
-                ffmpeg.on('log', ({ message }) => {
-                    log(message, 'info');
-                });
-
-                ffmpeg.on('progress', ({ progress, time }) => {
-                    const percentage = Math.round(progress * 100);
-                    updateProgress(percentage, `Converting... (${(time / 1000000).toFixed(1)}s)`);
-                });
-
-                const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
-                
-                updateProgress(20, 'Downloading FFmpeg core...');
-                
-                await ffmpeg.load({
-                    coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
-                    wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
-                });
+                await ffmpeg.load();
 
                 isFFmpegLoaded = true;
                 updateProgress(100, 'FFmpeg loaded successfully!');
@@ -427,7 +364,6 @@
             elements.progressContainer.classList.add('show');
             
             try {
-                const { fetchFile } = FFmpegUtilModule;
                 const inputFileName = selectedFile.name;
                 const outputFormat = elements.outputFormat.value;
                 const outputFileName = getOutputFileName(inputFileName, outputFormat);
@@ -437,7 +373,7 @@
                 updateProgress(0, 'Loading file...');
 
                 // Write input file
-                await ffmpeg.writeFile(inputFileName, await fetchFile(selectedFile));
+                ffmpeg.FS('writeFile', inputFileName, await fetchFile(selectedFile));
                 log('File loaded into FFmpeg memory', 'info');
                 updateProgress(10, 'File loaded, starting conversion...');
 
@@ -449,32 +385,17 @@
                     log(`Using bitrate: ${bitrate}`, 'info');
                 }
 
-                // Add format-specific encoding options
-                if (outputFormat === 'mp3') {
-                    args.push('-codec:a', 'libmp3lame');
-                } else if (outputFormat === 'aac' || outputFormat === 'm4a') {
-                    args.push('-codec:a', 'aac');
-                } else if (outputFormat === 'ogg') {
-                    args.push('-codec:a', 'libvorbis');
-                } else if (outputFormat === 'opus') {
-                    args.push('-codec:a', 'libopus');
-                } else if (outputFormat === 'flac') {
-                    args.push('-codec:a', 'flac');
-                } else if (outputFormat === 'wav') {
-                    args.push('-codec:a', 'pcm_s16le');
-                }
-
                 args.push(outputFileName);
                 
                 log(`Executing: ffmpeg ${args.join(' ')}`, 'info');
 
                 // Execute conversion
-                await ffmpeg.exec(args);
+                await ffmpeg.run(...args);
 
                 updateProgress(90, 'Reading output file...');
                 
                 // Read output file
-                const data = await ffmpeg.readFile(outputFileName);
+                const data = ffmpeg.FS('readFile', outputFileName);
                 
                 updateProgress(100, 'Conversion complete!');
                 log('Conversion completed successfully!', 'success');
@@ -484,8 +405,8 @@
                 downloadFile(blob, outputFileName);
 
                 // Cleanup
-                await ffmpeg.deleteFile(inputFileName);
-                await ffmpeg.deleteFile(outputFileName);
+                ffmpeg.FS('unlink', inputFileName);
+                ffmpeg.FS('unlink', outputFileName);
 
                 showNotification('Conversion Complete!', `${outputFileName} has been downloaded successfully.`, 'success');
                 
